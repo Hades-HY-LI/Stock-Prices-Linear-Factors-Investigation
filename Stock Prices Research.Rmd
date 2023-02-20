@@ -1,0 +1,448 @@
+---
+title: "Stock Prices Research"
+date: "12/10/2021"
+author: "Hongye Li, Jeff Anderson, Tianyuan Gu, Nicolas Guerzon"
+output: pdf_document
+bibliography: Final_project_ref.bib
+biblio-style: "apalike"
+link-citations: true
+fontsize: 12pt
+geometry: margin=1in
+abstract:
+  Investment in stock is one of the easiest ways people can reach their own fortune. In this project, we propose several models to predict the prices of Apple stock for investment suggestions. We try to find the linear combination of indexes and commodities that can track the stock prices well. We can use the combination as a portfolio for hedging the risk. We build functions to extract and cleaning the raw data from multiple sources for easy manipulation. We explore the data and carry out several tests to eliminate autocorrelation. We build models by considering multicollinearity, insignificant variables, autocorrelation and linear regression assumption. We compare each model by its cross validation value and select the model with lowest value as the 'best' predictive model for this project.
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+options(tinytex.verbose = TRUE)
+```
+
+# 1 Introduction
+
+Financial data is broad in scope and can take many different forms, but of interest to this project was stock and market data. One of the largest stock exchanges is NASDAQ, which stands for National Association of Securities Dealers Automated Quotations. The marketplace for financial securities is a fundamental component of the economy, and as such, certain stock indexes have been established that can help to gauge the overall market conditions [@Hayes].
+One of the most famous indexes is The Dow Jones Industrial Average. The index is comprised of 30 “blue chip”  stocks which span several sectors and are all firmly established, mature companies . The Dow Jones Industrial Average can be referred to as “Dow Jones” or “The Dow” [@Hall].
+Stock price is always the one of the most important topics in investment. A stock (also known as equity) is a security that represents the ownership of a fraction of a corporation [@Hayes_stock]. It may reflect the value of the company, investors’ expectation of the company, etc. 
+The changes in stock price can make many people rich, and also many people bankrupt. The opportunity of fortune, even with the risks, are why so many people are enthusiastically trying to predict prices. In this paper, we try to predict the stock prices by the linear combination of predictors such as index prices [@James] and commodity prices. The linear combination of predictors will be a portfolio. We can use these predictors to hedge risk of the stock. Because for the purpose of providing investment suggestions for keeping wealth, we focus more on controlling the risk of the investment. In this way, we can earn the fixed profit between the stock and the portfolio of the predictors. There are two main questions for this procedure:
+
+1)	Which linear combination of predictor can predict the stock prices well?
+
+2)	Do the linear model assumptions hold given the time-based nature of the observations and given the set of predictors?
+
+In this paper, we selected Apple Inc. as the target stock prices (i.e., response variable) for our research. The predictors are Nasdaq indexes prices, Dow Jones indexes prices and and commodities' futures prices. Our goal of the project is to find the ‘best’ model that can predict Apple stock prices well. The corresponding investment suggestion will be using the combination of these predictors to hedge risk of the stock prices of Apple. 
+
+# 2 Data preparation
+
+The data we used is from a Chinese company called Wind [@Wind], a China's financial information services industry. We downloaded different data files from Wind’s professional software. These files contained stocks prices from Nasdaq Market, different indexes prices and commodity futures prices with time range from 10/28/2020 to 10/26/2021.
+
+Since we selected Apple Inc. to be the target stock of this project, the data set used for this project was thus assembled from multiple source files, and functions were constructed that would allow for a data set that can be customized by specifying the tick name of a stock (the ticker symbol is simply the abbreviated identification).
+
+## 2.1 Data merging
+
+We first built a Data Merging function--**dpfunc**. The function could extract variables we used for this project from different data files and combine them to a single data set. During this process, it would select the stock corresponding with our input--the ticker name of a stock. For this project, AAPL.O --  the ticker symbol for Apple stock --  was selected, but analysis can be readily expanded to any other stock through the use of this custom data set assembly procedure.
+
+## 2.2 Data cleaning
+
+The second function we built was a Data Cleaning function--**clean_data**. After assembling the data from multiple sources, it was then necessary to further clean it further by removing unnecessary columns and deciding on how to impute missing values. Columns that lack any measurements or that contain quarterly measurements were removed. Columns that were missing only a few values were imputed with the average of the two surrounding neighbors.
+
+## 2.3 Data processing
+
+In the end, we built a Data Processing function--**dprofunc** to combine the above two functions to generate the data set we would use for our project. By this function, we set input with 'AAPL.O' and got the cleaned data set for this project.
+
+The cleaned and final data set contains the price for Apple stock as well as 34 other exogenous variables including: six stock specific financial quantities such as volume traded per day, earnings per share ratio, and total market value of Apple; the main Dow Jones index as well as 10 of its subsidiary, industry-specific indexes; seven futures prices for commodities ranging from lithium and gold all the way to coffee; and finally 10 NASDAQ indexes which are functionally similar to the Dow Jones.
+
+We split the data into two data sets, training data set (first 194 trading days) and validation data set (next 35 trading days). We used the training data set to fit the models and compared the models by the validation data set.
+
+```{r, echo=F}
+# data merging function
+dpfunc <- function(x){
+  # read the data files
+  nas_change <- read.csv('NASDAQ_CHANGE.csv', header = F)
+  nas_statement <- read.csv('NASDAQ_FINANCE_STATEMENT.csv', header = F)
+  nas_market <- read.csv('NASDAQ_MARKET_ CAPITAL.csv', header = F)
+  nas_price <- read.csv('NASDAQ_PRICE.csv', header = F)
+  nas_DJ <- read.csv('Doll Jones index.csv', header = F)
+  nas_FP <- read.csv('Futures prices.csv', header = F)
+  nas_NASind <- read.csv('Nasdaq index price.csv', header = F)
+  
+  # extract the useful columns (predictor variables) of the company 'x' by searching for x's position
+  a <- nas_price[,(which(nas_price== x, arr.ind = T)[2]-1):(which(nas_price== x, arr.ind = T)[2]+2)]
+  b <- nas_market[,which(nas_market== x, arr.ind = T)[2]:(which(nas_market== x , arr.ind = T)[2]+1)]
+  c <- nas_change[,which(nas_change== x, arr.ind = T)[2]:(which(nas_change== x , arr.ind = T)[2]+1)]
+  d <- nas_statement[,which(nas_statement== x, arr.ind = T)[2]:(which(nas_statement== x , arr.ind = T)[2]+2)]
+  # extract the columns of prices of different indexes
+  e <- nas_DJ[,seq(2,32,3)]
+  f <- nas_FP[,seq(2,32,3)]
+  g <- nas_NASind[,seq(2,38,3)]
+  
+  # combine the columns extracted above to generate a new dataset
+  proj_data <- cbind(a,b,c,d,e[-c(1,3,5,250:261),], f[-c(1,3,5,250:261),], g[-c(1,3,5,250:261),])
+  
+  # supplement some missing names
+  proj_data[1, 1:(ncol(a)+ncol(b)+ncol(c)+ncol(d))] <- x
+  
+  # name each column and cut the useless rows off
+  colnames(proj_data) <- paste(proj_data[1,], proj_data[2,], sep = '_')
+  proj_data <- proj_data[-c(1,2),]
+  return(proj_data)
+}
+```
+
+```{r, echo=F}
+# data cleaning function
+clean_data = function(x){
+  #pull the first column of input file (date) to use as row names
+  dates = x[,1]
+  #convert entries from character to numeric
+  proj_data2 = apply(x, 2, as.numeric)
+  rownames(proj_data2) = dates
+  
+  #get rid of mostly empty columns as well as first and last rows
+  counts = numeric()
+  for(i in 1:ncol(proj_data2)){
+    counts[i] = sum(is.na(proj_data2[,i]))
+  }
+  trash_columns.index = counts<10
+  impute_columns.names = colnames(proj_data2[,(5<counts) & (counts<10) ])
+  proj_data2 = proj_data2[-c(1,nrow(proj_data2)),trash_columns.index]
+  
+  #for columns only missing a few values impute as the average of the adjacent column entries
+  for(j in 2:ncol(proj_data2)){
+    for(i in 1:nrow(proj_data2)){
+      if(is.na(proj_data2[i,j])){
+        proj_data2[i,j] = mean(c(proj_data2[i-1,j], proj_data2[i+1,j]))
+      }
+      else{
+        proj_data2[i,j] = proj_data2[i,j]
+      }
+      
+    }
+  }
+  
+  #output cleaned data set
+  return(proj_data2)
+}
+```
+
+```{r, echo=F, message=F, warning=F}
+# data processing function
+dprofunc <- function(x){
+  step1 <- dpfunc(x)
+  step2 <- clean_data(step1)
+  return(data.frame(step2))
+}
+
+library(car)
+# get the dataset of Apple.Inc
+proj_data <- dprofunc('AAPL.O')
+ind <- seq(1, round(0.8*nrow(proj_data)))
+VD <- proj_data[-ind,][1:35,]
+proj_data2 <- proj_data[ind,]
+```
+
+# 3 Methods and Results
+
+In this paper, we decided to use linear regression to fit the model for prediction. Since we had a lot of variables in our final data set and some of them were obvious not related to Apple stock, we selected some variables as the predictors from the final data set by experience.
+
+The predictors we selected:
+
+|Predictors' name        |Interpretation of predictors                                      |
+|------------------------|------------------------------------------------------------------|
+|* DJUSTL.GI_close:      |Dow Jones American telecommunication service index closing prices |
+|* DJUSTC.GI_close:      |Dow Jones American technology index closing prices                |
+|* DJUSEN.GI_close:      |Dow Jones American Petroleum and natural gas index closing prices |
+|* DJUSCY.GI_close:      |Dow Jones American consumption index closing prices               |
+|* DJUSNC.GI_close:      |Dow Jones American living consumption index closing prices        |
+|* KCZ21E.NYB_close:     |futures prices of coffee                                          |
+|* CLZ21E.NYM_close:     |futures prices of light crude oil                                 |
+|* IXCO.O_close:         |Nasdaq computer index closing prices                              |
+|* IXIC.GI_close:        |Nasdaq index closing prices                                       |
+|* IXTC.O_close:         |Nasdaq telecommunication service index closing prices             |
+
+Before fitting the model, we checked the distribution and correlation matrix of each variable first.
+
+```{r, echo=F, message=F, warning=F}
+library(ggplot2)
+library(ggthemes)
+library(corrplot)
+library(ggpubr)
+library(car)
+library(MASS)
+# histogram of our response variable
+hist_AAPL.O_close = ggplot(data = proj_data2,aes(x = AAPL.O_close)) + 
+  geom_histogram(aes(y=..density..),fill='#3484BE',alpha=0.7,bins = 20)+
+  geom_density(size = 1.0)+ 
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_blank())
+
+
+# predictors we pick for model1
+hist_DJUSTL.GI_close = ggplot(data = proj_data2,aes(x = DJUSTL.GI_close)) + 
+  geom_histogram(aes(y=..density..),fill='#3484BE',alpha=0.7,bins = 20)+
+  geom_density(size = 1.0)+ 
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_blank())
+
+
+hist_DJUSTC.GI_close = ggplot(data = proj_data2,aes(x = DJUSTC.GI_close)) + 
+  geom_histogram(aes(y=..density..),fill='#3484BE',alpha=0.7,bins = 20)+
+  geom_density(size = 1.0)+ 
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_blank())
+
+hist_DJUSEN.GI_close = ggplot(data = proj_data2,aes(x = DJUSEN.GI_close)) + 
+  geom_histogram(aes(y=..density..),fill='#3484BE',alpha=0.7,bins = 20)+
+  geom_density(size = 1.0)+ 
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_blank())
+
+hist_DJUSCY.GI_close = ggplot(data = proj_data2,aes(x = DJUSCY.GI_close)) + 
+  geom_histogram(aes(y=..density..),fill='#3484BE',alpha=0.7,bins = 20)+
+  geom_density(size = 1.0)+ 
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_blank())
+
+hist_DJUSNC.GI_close = ggplot(data = proj_data2,aes(x = DJUSNC.GI_close)) + 
+  geom_histogram(aes(y=..density..),fill='#3484BE',alpha=0.7,bins = 20)+
+  geom_density(size = 1.0)+ 
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_blank())
+
+
+hist_KCZ21E.NYB_close = ggplot(data = proj_data2,aes(x = KCZ21E.NYB_close)) + 
+  geom_histogram(aes(y=..density..),fill='#3484BE',alpha=0.7,bins = 20)+
+  geom_density(size = 1.0)+ 
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_blank())
+
+
+hist_CLZ21E.NYM_close = ggplot(data = proj_data2,aes(x = CLZ21E.NYM_close)) + 
+  geom_histogram(aes(y=..density..),fill='#3484BE',alpha=0.7,bins = 20)+
+  geom_density(size = 1.0)+ 
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_blank())
+
+hist_IXCO.O_close = ggplot(data = proj_data2,aes(x = IXCO.O_close)) + 
+  geom_histogram(aes(y=..density..),fill='#3484BE',alpha=0.7,bins = 20)+
+  geom_density(size = 1.0)+ 
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_blank())
+
+hist_IXIC.GI_close = ggplot(data = proj_data2,aes(x = IXIC.GI_close)) + 
+  geom_histogram(aes(y=..density..),fill='#3484BE',alpha=0.7,bins = 20)+
+  geom_density(size = 1.0)+ 
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_blank())
+
+hist_IXTC.O_close = ggplot(data = proj_data2,aes(x = IXTC.O_close)) + 
+  geom_histogram(aes(y=..density..),fill='#3484BE',alpha=0.7,bins = 20)+
+  geom_density(size = 1.0)+ 
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_blank())
+
+ggarrange(hist_AAPL.O_close,hist_DJUSTL.GI_close,hist_DJUSTC.GI_close,hist_DJUSEN.GI_close,hist_DJUSCY.GI_close,hist_DJUSNC.GI_close,hist_KCZ21E.NYB_close,hist_CLZ21E.NYM_close,hist_IXCO.O_close,hist_IXIC.GI_close,hist_IXTC.O_close,nrow = 3,ncol = 4)
+```
+
+The distribution of each variable is shown above. We found that the response variable was not normally distributed, which means we may need to do something to the residuals to fulfill the assumption of linear regression.
+
+```{r, echo=F, warning=F}
+# Correlation matrix between predictors
+category.1 = c("DJUSTL.GI", "DJUSTC.GI", "DJUSEN.GI", "DJUSCY.GI","DJUSNC.GI","KCZ21E.NYB","CLZ21E.NYM","IXCO.O","IXIC.GI","IXTC.O")
+attach(proj_data2)
+std1.1 = cbind(DJUSTL.GI_close,DJUSTC.GI_close,DJUSEN.GI_close,DJUSCY.GI_close,DJUSNC.GI_close,KCZ21E.NYB_close,CLZ21E.NYM_close,IXCO.O_close,IXIC.GI_close,IXTC.O_close)
+detach(proj_data2)
+colnames(std1.1) = category.1
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+corrplot(cor(std1.1), method="color", col=col(300),  
+         type="upper", order="AOE", 
+         addCoef.col = "black",
+         tl.col="black", tl.srt=40, 
+         diag=TRUE
+)
+```
+
+The correlation matrix shows that predictors are highly correlated with each other which means that we may have multicollinearity in the model. We will check if some of them should be dropped by multicollinearity.
+
+## 3.1 Model selection
+
+### 3.1.1 Full model: *model1*
+
+The process for building a linear full model--*model1* will begin with an initial selection of stocks based on background knowledge to inform decisions regarding plausible predictor variables that could potentially influence the price of Apple Stock, which are the predictors above. *model1* got a very high adjusted R-squared value 0.925. We found no heteroscedasticity and influential cases from following plots. Its Q-Q plot shows that it's nearly a normal distribution. However, when we checked the summary of *model1*, we found some insignificant variables in *model1*, such as `DJUSNC.GI_close`, `KCZ21E.NYB_close` and `CLZ21E.NYM_close`.
+
+```{r, echo=F}
+# select some predictors by experience to build 1st model, named 'model1'
+model1 <- lm(AAPL.O_close ~ DJUSTL.GI_close + DJUSTC.GI_close + DJUSEN.GI_close + DJUSCY.GI_close + DJUSNC.GI_close + KCZ21E.NYB_close + CLZ21E.NYM_close + IXCO.O_close + IXIC.GI_close + IXTC.O_close, data = proj_data2)
+# look at the summary of model1
+#summary(model1)
+# plots of model1, Q-Q plot shows a little right skewed pattern
+par(mfrow=c(2,2))
+plot(model1)
+```
+
+### 3.1.2 Model with insignificant variables dropped: *model2*
+
+Since *model1* is full model, it may include some nuisance variables. Since nuisance variables may yield large mean-squared-estimation-error and it tends to overfit the data, we dropped the insignificant variables directly and built *model2*. We fit the *model2* by `AAPL.O_close ~ DJUSTL.GI_close + DJUSTC.GI_close + DJUSEN.GI_close + DJUSCY.GI_close + IXCO.O_close + IXIC.GI_close + IXTC.O_close`. By checking its summary, we found all the predictors are significant and the adjusted R-squared value is nearly the same with *model1*.
+
+```{r, echo=F}
+# drop insignificant predictors from model1 by significant level 0.05 and build 2nd model, named 'model2'
+model2 <- lm(AAPL.O_close ~ DJUSTL.GI_close + DJUSTC.GI_close + DJUSEN.GI_close + DJUSCY.GI_close + IXCO.O_close + IXIC.GI_close + IXTC.O_close, data = proj_data2)
+# look at the summary of model2
+#summary(model2)
+# plots of model2, the plots perform pretty well
+par(mfrow=c(2,2))
+plot(model2)
+```
+
+As usual, the residual plots will be examined for deviations from necessary model assumptions. From the plots of *model2*, we found it fulfills the assumption of normality with no influential cases. However, we found a periodic pattern in its residual plot. For dealing with such problem, we need to introduce 'time series' and the 'Durbin Watson test'.
+
+A time series refers to a set of data that are collected at equal intervals in time. One of the hurdles in time series data is the presence of autocorrelation, which refers to serially correlated error terms. A whole discipline of statistics known as Time Series Analysis is dedicated to modeling such processes by treating the time series as a single observation of an underlying stochastic process. However, since such analysis was not contained in the scope of this class, traditional time series approaches to modeling this type of behavior will not be explored in great detail.
+
+The Durbin Watson test is a formal diagnostic tool to test for autocorrelation of the residuals. Autocorrelation, which as the name suggests, indicates that the residuals and thus the error terms of the model are not uncorrelated as is necessitated by the linear model assumptions. Kutner suggests that a potential cause for positively autocorrelated error terms in economic data is the presence of systematic coverage errors in the response variable time series. Important consequences of autocorrelated errors include that the ordinary least squares procedures can often lead to inefficient estimates and grossly underestimate MSE.
+
+The Durbin Watson test specifies that the error terms are of the following form:
+$$
+\epsilon_t = \rho\epsilon_{t-1}+\mu_t \\ 
+\mu_t \sim N(0,\sigma^2)
+$$
+With hypotheses:
+$$H0:\ \rho=0,\ Ha:\ \rho\ne0$$
+With the appropriate test statistic computed, small p-values will lead to a rejection of the null hypothesis which indicates there is evidence of autocorrelation in the residuals. Kutner explains that an important caveat to the Durbin Watson test is that it is not robust against misspecifications of the model. Meaning that it is primarily useful in only detecting first order autocorrelation and not, for example, second-order autoregressive patterns.
+
+In this paper, we checked autocorrelation by drawing the time-series plot of residuals and conducting Durbin Watson test.
+
+```{r, echo=F}
+durbinWatsonTest(model2)
+plot(ts(model2$residuals))
+```
+
+We can notice an obvious periodic pattern from the residuals plot and Durbin Watson test shows that it has autocorrelation in the residuals, which means we need to do something to fix that.
+
+### 3.1.3 *model2* with lagged price added: *model2.lag*
+
+In this paper, we decided to add lagged price of Apple as a new predictor to eliminate the autocorrelation among residuals. We got *model2.lag* with little improvement of adjusted R-squared value. The predictors of *model2.lag* are all significant under 0.05 confidence level. The plots of *model2.lag* are nearly the same with model2, but less variation and periodic pattern of the residuals.
+
+```{r, echo=F}
+# create the lagged Apple stock prices predictor
+apple.stock.lag <- c(proj_data$AAPL.O_close[1], proj_data$AAPL.O_close[-length(proj_data$AAPL.O_close)])
+proj_data_lag <- data.frame(proj_data, apple.stock.lag)
+VD.lag <- proj_data_lag[-ind,][1:35,]
+proj_data2_lag <- proj_data_lag[ind,]
+
+# build a new model by adding lagged Apple stock prices as a new predictor, named 'model2.lag'
+model2.lag <- lm(AAPL.O_close ~ apple.stock.lag + DJUSTL.GI_close + DJUSTC.GI_close + DJUSEN.GI_close + DJUSCY.GI_close + IXCO.O_close + IXIC.GI_close + IXTC.O_close, data = proj_data2_lag)
+# rerun what we did to model2 above
+#summary(model2.lag)
+par(mfrow=c(2,2))
+plot(model2.lag)
+```
+
+Again, we checked autocorrelation by the time-series plot of residuals and Durbin Watson test. 
+
+```{r, echo=F}
+durbinWatsonTest(model2.lag)
+plot(ts(model2.lag$residuals))
+```
+
+The Durbin Watson test provides further evidence that model 2’s autocorrelation was reduced by adding in the lag predictor. The D-W statistic being closer to 2 and the autocorrelation measurement being lowered show that the lag model 2 has less autocorrelation then the normal model 2 [@Will]. Also, the D-W statistic being below 2 for both of these models means that the model has positive autocorrelation [@Roberto].
+
+
+### 3.1.4 *model2.lag* with high VIF variables dropped: *model3.lag*
+
+Although the predictors of *model2.lag* are all significant, but they may have multicollinearity due to what we discussed above. We checked it by VIF.
+
+```{r, echo=F}
+# all the predictors of model2.lag are significant. we want to check if there is multicollinearity in model2.lag
+vif(model2.lag)
+```
+
+By comparing the VIF values, we kept those variable with relatively small VIF values, 'apple.stock.lag', 'DJUSTL.GI_close' and 'DJUSEN.GI_close'. We built *model3.lag* by these predictors.
+
+```{r, echo=F}
+# the VIF of model2.lag shows several predictors have high VIF (VIF > 20), we will drop these predictors and build 'model3.lag'
+model3.lag <- lm(AAPL.O_close ~ apple.stock.lag + DJUSTL.GI_close  + DJUSEN.GI_close, data = proj_data2_lag)
+# rerun what we did to model2 above
+#summary(model3.lag)
+par(mfrow=c(2,2))
+plot(model3.lag)
+```
+
+The summary of *model3.lag* implies that only 'apple.stock.lag' is significant, but its adjusted R-squared value is high. The Q-Q plot indicates it does not distribute normally, so the linear regression assumptions do not hold for *model3.lag*.
+
+However, we found that the VIF value of each variable is very small.
+
+```{r, echo=F}
+vif(model3.lag)
+```
+
+As we discussed above, *model2.lag* is the 'best' model till now. To further examine this result, we decided to use backward stepwise to check if there is a better model apart from the models we have got. We used stepwise to the full model with adding the lagged price as new predictor and got step.lag.
+
+```{r, echo=F}
+# using stepwise method to model1.lag
+model1.lag <- lm(AAPL.O_close ~ apple.stock.lag + DJUSTL.GI_close + DJUSTC.GI_close + DJUSEN.GI_close + DJUSCY.GI_close + DJUSNC.GI_close + KCZ21E.NYB_close + CLZ21E.NYM_close + IXCO.O_close + IXIC.GI_close + IXTC.O_close, data = proj_data2_lag)
+step.lag <- stepAIC(model1.lag, scope = list(upper = model1.lag, lower = ~1), direction = 'both', k=2, trace = F)
+#summary(step.lag)
+# mean(((predict(step.lag)-proj_data2$AAPL.O_close)/(1-hatvalues(step.lag)))^2)
+```
+
+```{r}
+all(step.lag$call==model2.lag$call)
+```
+
+
+The result shows that we got the same model with *model2.lag* by backward stepwise procedure.
+
+### 3.1.5 Prediction
+
+In order to find the 'best' model that can predict the Apple stock prices well. We conducted LOOCV to test each model's predictive ability. We calculated the LOOCV value by the following formula:
+$$CV_{(n)}=\frac {1}{n} \sum_{i=1}^{n}\left(\frac {y_i-\hat y_i}{1-h_i}\right)^2$$
+and got the following table:
+
+```{r, echo=F}
+# compare these three models by LOOCV
+cv_model1 <- mean(((predict(model1)-proj_data2$AAPL.O_close)/(1-hatvalues(model1)))^2)
+cv_model2 <- mean(((predict(model2)-proj_data2$AAPL.O_close)/(1-hatvalues(model2)))^2)
+cv_model2.lag <- mean(((predict(model2.lag)-proj_data2_lag$AAPL.O_close)/(1-hatvalues(model2.lag)))^2)
+cv_model3.lag <- mean(((predict(model3.lag)-proj_data2_lag$AAPL.O_close)/(1-hatvalues(model3.lag)))^2)
+cv_table2 <- data.frame(cv_model1, cv_model2, cv_model2.lag, cv_model3.lag)
+knitr::kable(cv_table2, caption = 'Cross Validation table')
+
+# # from the table, we conclude that model2.lag is the 'best' model
+```
+
+By comparing the value of each model's cross validation value, it implies that *model2.lag* has the best predictive ability, which answering our question that *model2.lag* can predict the Apple price well. Although it still has autocorrelation, the corresponding value is really low. The linear regression assumptions also hold for *model2.lag*. 
+
+For futher checking its predictive ability, we drawed a plot contains each model's prediction and the true value of Apple stock prices in validation data set. We obtained a plot as following:
+
+```{r, echo=F}
+b <- data.frame(index <- seq(1, nrow(VD)),
+                x0 <- VD$AAPL.O_close,
+                x1 <- predict(model1, VD),
+                x2 <- predict(model2, VD),
+                x2.lag <- predict(model2.lag, VD.lag),
+                x3.lag <- predict(model3.lag, VD.lag))
+library(ggplot2)
+ggplot(aes(x = index),data = b)+
+  geom_line(aes(y = x0,colour="AAPL.O_close"))+
+  geom_line(aes(y = x1,colour="model1"))+
+  geom_line(aes(y = x2,colour="model2"))+
+  geom_line(aes(y = x2.lag,colour="model2.lag"))+
+  geom_line(aes(y = x3.lag,colour="model3.lag"))+
+  scale_color_manual("",
+                     breaks = c("AAPL.O_close","model1","model2","model2.lag","model3.lag"),
+                     values = c("black","gray","sky blue","red","green"))+
+  labs(title = 'Prediction in validation data set')+
+  xlab(label = 'time index')+
+  ylab(label = 'prices')
+```
+
+From the plot, we can see that the predictions of both *model1* (gray line) and *model2* (sky blue line) departure further from the true value. Although *model3.lag* (green line) seems closer to the true value line, it has an obvious 'lagged' pattern. By checking *model3.lag*'s coefficients, we found that *model3.lag* put most its weight to the `lagged prices` which yields such phenomenon. However, *model2.lag* (red line) shows no 'lagged' pattern and it's closer to the true value line. Therefore, we concluded that *model2.lag* shows the best predictive ability among all the models we got.
+
+# 4 Conclusion and Discussion
+
+We built *model1* as the full model for the project and we found there are insignificant variable in *model1*. We built *model2* by dropped those insignificant variable. We have explored the distribution of each variable and the residuals plot of *model2*. We noticed an obvious periodic pattern which may due to autocorrelation, so we ran Durbin Watson test and found autocorrelation in *model2*. We decided to add lagged price of Apple to *model2* and got *model2.lag*. The Durbin Watson test showed that autocorrelation decreases a lot. The time-series plot of residuals implies that the periodic pattern is nearly eliminated by the lagged prices. We have explored the correlation matrix of each variable and it may have multicollinearity in the models. In order to remove multicollinearity, we compared VIF values of each variable in *model2.lag*. We dropped those variables with high VIF values and built *model3.lag*. We found no high VIF values of the variables in *model3.lag*. After that, we used the LOOCV value of each model to compare their predictive ability. We also drew a plot that contained each model's prediction line and true value line in the validation data set. We got the conclusion that *model2.lag* is the best model we got. The linear regression assumptions hold for *model2.lag*. The linear combination of its predictors `apple.stock.lag`, `DJUSTL.GI_close`, `DJUSTC.GI_close`, `DJUSEN.GI_close`, `IXIC.GI_close`, `DJUSCY.GI_close`, `IXCO.O_close` and `IXTC.O_close` can predict the Apple stock prices well. We found some interesting things from the models predictors. Except `DJUSEN.GI_close`, other variables are all related to technology, consumption, etc. However, `DJUSEN.GI_close` represents 'Dow Jones American Petroleum and natural gas index' and its corresponding coefficient is negative, which means if the petroleum index decrease, the price of Apple has some probability to increase.
+
+Since the real world is much more complicated that linear model may not be enough to fit. It is reasonable to consider more complex model to fit such problem. We may conduct more research on eliminating the autocorrelation and trying some non-linear methods to this problem in the future.
+
+# Reference
